@@ -1,6 +1,6 @@
 {
   "name": "ucreate-simulator",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "An accessible desktop simulator of UCreate Music",
   "author": "Bryce Belcher",
   "main": "electron/main.js",
@@ -18,7 +18,10 @@
     "copyright": "Copyright © 2026 Bryce Belcher",
     "directories": { "output": "outputs/windows" },
     "files": ["app/**/*", "electron/**/*", "package.json"],
-    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "requestedExecutionLevel": "requireAdministrator" },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "requestedExecutionLevel": "asInvoker"
+    },
     "nsis": {
       "oneClick": false,
       "perMachine": true,
@@ -31,3 +34,4 @@
     }
   }
 }
+                        
