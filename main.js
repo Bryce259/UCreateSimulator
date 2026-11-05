@@ -4,6 +4,7 @@ const path = require('path');
 function createWindow() {
   const window = new BrowserWindow({
     width: 1360, height: 900, minWidth: 1000, minHeight: 720,
+    icon: path.join(__dirname, '..', 'app', 'assets', 'ucreate-icon.png'),
     title: 'UCreate Simulator',
     webPreferences: { contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'preload.js') }
   });
