@@ -74,6 +74,7 @@
     const url = fileFor(lane, index); const audio = new Audio(url); audio.loop = true; setPitchMode(audio);
     const source = ctx.createMediaElementSource(audio); source.connect(linked.has(lane) ? fx.input : laneNodes[lane].input);
     active[lane] = { audio, source, index, url, reversed:false }; await audio.play(); updateLaneUI(lane, index);
+    updateReverseMode($('#effect').value);
     status(`${LANE_INFO[lane][1]} ${index} playing.`);
   }
   function updateLaneUI(lane, selectedIndex) {
@@ -134,6 +135,7 @@
     Object.entries(active).forEach(([lane, item]) => {
       if (type === 'reverse' && linked.has(lane) && !item.reversed) playReverse(lane, item);
       if (type !== 'reverse' && item.reversed) restoreForward(lane, item);
+      if (type === 'reverse' && !linked.has(lane) && item.reversed) restoreForward(lane, item);
     });
   }
   function makeCurve(amount) { const curve = new Float32Array(44100); for (let i = 0; i < curve.length; i++) { const x = i * 2 / curve.length - 1; curve[i] = (1 + amount) * x / (1 + amount * Math.abs(x)); } return curve; }
