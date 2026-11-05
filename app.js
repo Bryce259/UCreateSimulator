@@ -142,6 +142,42 @@
   function setBPM(value) { bpm = Math.max(60, Math.min(180, value)); $('#bpmOut').textContent = `${bpm} BPM`; updateFX(); }
   function click() { if (!ctx) return; const oscillator = ctx.createOscillator(), gain = ctx.createGain(); oscillator.frequency.value = 1500; gain.gain.setValueAtTime(.12, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + .05); oscillator.connect(gain).connect(master); oscillator.start(); oscillator.stop(ctx.currentTime + .06); }
 
+  function audioBufferToWav(buffer) {
+    const numChannels = buffer.numberOfChannels, sampleRate = buffer.sampleRate, length = buffer.length;
+    const bytesPerSample = 2, blockAlign = numChannels * bytesPerSample, dataSize = length * blockAlign;
+    const wav = new ArrayBuffer(44 + dataSize), view = new DataView(wav);
+    const writeText = (offset, text) => { for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i)); };
+    writeText(0, 'RIFF'); view.setUint32(4, 36 + dataSize, true); writeText(8, 'WAVE');
+    writeText(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true); view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true); view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true); writeText(36, 'data'); view.setUint32(40, dataSize, true);
+    const channels = [];
+    for (let c = 0; c < numChannels; c++) channels.push(buffer.getChannelData(c));
+    let offset = 44;
+    for (let i = 0; i < length; i++) for (let c = 0; c < numChannels; c++) {
+      const sample = Math.max(-1, Math.min(1, channels[c][i]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+      offset += 2;
+    }
+    return new Blob([wav], { type: 'audio/wav' });
+  }
+  async function exportSongWav() {
+    if (!songUrl) return;
+    status('Preparing WAV file for export...');
+    try {
+      initAudio();
+      const response = await fetch(songUrl);
+      const audioBuffer = await ctx.decodeAudioData(await response.arrayBuffer());
+      const wavBlob = audioBufferToWav(audioBuffer);
+      const url = URL.createObjectURL(wavBlob);
+      const link = document.createElement('a');
+      link.href = url; link.download = 'UCreate-song.wav'; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      status('Song exported as a WAV file.');
+    } catch { status('WAV export failed for this recording.'); }
+  }
+
   function recordSong() {
     initAudio(); if (songRecorder?.state === 'recording') { songRecorder.stop(); return; }
     songChunks = []; songSeconds = 0; $('#songRecord').disabled = true; status('Four-beat count-in. Song recording will start after four clicks.'); let count = 0;
@@ -187,6 +223,6 @@
   $('#pack').onchange = changePack; $('#slot').onchange = event => { recordingSlot = event.target.value; $('#inputPlay').disabled = !recordingBuffers[recordingSlot]; $('#inputLoop').disabled = !recordingBuffers[recordingSlot]; status(`Recording slot ${recordingSlot} selected.`); };
   $('#inputRecord').onclick = recordInput; $('#importAudio').onchange = importAudio; $('#inputPlay').onclick = () => playRecording(false); $('#inputLoop').onclick = () => playRecording(true);
   $('#inputLink').onclick = event => { const on = event.currentTarget.getAttribute('aria-pressed') !== 'true'; event.currentTarget.setAttribute('aria-pressed',String(on)); status(`Recording ${on ? 'linked to' : 'unlinked from'} effects.`); };
-  $('#songRecord').onclick = recordSong; $('#songPlay').onclick = toggleSongPlayback; $('#exportSong').onclick = () => { const link = document.createElement('a'); link.href = songUrl; link.download = 'UCreate-song.webm'; link.click(); status('Song export started.'); }; $('#reset').onclick = reset;
+  $('#songRecord').onclick = recordSong; $('#songPlay').onclick = toggleSongPlayback; $('#exportSong').onclick = exportSongWav; $('#reset').onclick = reset;
   addPads(); wireLinks(); loadPackRecordings(); updateFX();
 })();
