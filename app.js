@@ -64,15 +64,16 @@
     for (const property of ['preservesPitch', 'mozPreservesPitch', 'webkitPreservesPitch']) {
       if (property in audio) audio[property] = !followsSpeed;
     }
-    audio.playbackRate = bpm / 100;
+    if (audio.playbackRate && typeof audio.playbackRate.value === 'number') audio.playbackRate.value = bpm / 100;
+    else audio.playbackRate = bpm / 100;
   }
   async function toggleLoop(lane, index, button) {
     initAudio(); await ctx.resume(); if (isSongPlaying) return;
     if (active[lane]?.index === index) { stopLane(lane); status(`${LANE_INFO[lane][1]} muted.`); return; }
     stopLane(lane);
-    const audio = new Audio(fileFor(lane, index)); audio.loop = true; setPitchMode(audio);
+    const url = fileFor(lane, index); const audio = new Audio(url); audio.loop = true; setPitchMode(audio);
     const source = ctx.createMediaElementSource(audio); source.connect(linked.has(lane) ? fx.input : laneNodes[lane].input);
-    active[lane] = { audio, source, index }; await audio.play(); updateLaneUI(lane, index);
+    active[lane] = { audio, source, index, url, reversed:false }; await audio.play(); updateLaneUI(lane, index);
     status(`${LANE_INFO[lane][1]} ${index} playing.`);
   }
   function updateLaneUI(lane, selectedIndex) {
@@ -83,7 +84,7 @@
     });
   }
   function stopLane(lane) {
-    if (!active[lane]) return; active[lane].audio.pause(); active[lane].source.disconnect(); delete active[lane]; updateLaneUI(lane, 0);
+    if (!active[lane]) return; const item = active[lane]; if (item.reversed) item.source.stop(); else item.audio.pause(); item.source.disconnect(); delete active[lane]; updateLaneUI(lane, 0);
   }
   function wireLinks() {
     document.querySelectorAll('.link').forEach(button => button.addEventListener('click', () => {
@@ -91,13 +92,14 @@
       linked.has(lane) ? linked.delete(lane) : linked.add(lane);
       button.setAttribute('aria-pressed', String(linked.has(lane)));
       if (active[lane]) { const item = active[lane]; item.source.disconnect(); item.source.connect(linked.has(lane) ? fx.input : laneNodes[lane].input); }
+      updateReverseMode($('#effect').value);
       status(`${LANE_INFO[lane][1]} ${linked.has(lane) ? 'linked to' : 'unlinked from'} effects.`);
     }));
   }
 
   function updateFX() {
     const type = $('#effect').value, x = +$('#fxX').value / 100, y = +$('#fxY').value / 100;
-    const descriptions = { flanger:'A sweeping jet-plane texture.', phaser:'A stepped, beat-like phase sweep.', echo:'Repeats the sound with adjustable delay and regeneration.', rewind:'Changes the linked playback speed.', fr:'Changes linked playback direction and blend.', lpf:'Removes high frequencies with resonant filtering.', distortion:'Adds saturation and harmonics.', tremolo:'Pulses the linked sound volume.', warped:'Blends feedback delay with saturation for an unstable warped sound.', swirling:'Rotates a moving band-pass filter through the linked sound.' };
+    const descriptions = { flanger:'A sweeping jet-plane texture.', phaser:'A stepped, beat-like phase sweep.', echo:'Repeats the sound with adjustable delay and regeneration.', rewind:'Changes the linked playback speed.', fr:'Changes linked playback direction and blend.', lpf:'Removes high frequencies with resonant filtering.', distortion:'Adds saturation and harmonics.', tremolo:'Pulses the linked sound volume.', warped:'Blends feedback delay with saturation for an unstable warped sound.', swirling:'Rotates a moving band-pass filter through the linked sound.', reverse:'Plays linked loops backward while keeping them in sync.' };
     $('#fxHelp').textContent = descriptions[type];
     if (!ctx) return;
     fx.filter.type = type === 'swirling' ? 'bandpass' : 'lowpass';
@@ -108,7 +110,31 @@
     fx.lfo.frequency.value = type === 'swirling' ? .12 + x * 3 : .01;
     fx.lfoGain.gain.value = type === 'swirling' ? 150 + y * 2300 : 0;
     fx.output.gain.value = (+$('#fxLevel').value / 100) * .85;
+    updateReverseMode(type);
     Object.values(active).forEach(({audio}) => setPitchMode(audio));
+  }
+  async function playReverse(lane, item) {
+    if (item.reversing || item.reversed) return; item.reversing = true;
+    try {
+      const response = await fetch(item.url); const original = await ctx.decodeAudioData(await response.arrayBuffer());
+      if ($('#effect').value !== 'reverse' || active[lane] !== item || !linked.has(lane)) return;
+      const reversed = ctx.createBuffer(original.numberOfChannels, original.length, original.sampleRate);
+      for (let channel = 0; channel < original.numberOfChannels; channel++) reversed.copyToChannel(Float32Array.from(original.getChannelData(channel)).reverse(), channel);
+      const source = ctx.createBufferSource(); source.buffer = reversed; source.loop = true; setPitchMode(source); source.connect(fx.input);
+      item.audio.pause(); item.source.disconnect(); item.source = source; item.reversed = true; source.start(); status(`${LANE_INFO[lane][1]} playing in reverse.`);
+    } catch { status('Reverse could not prepare this loop.'); } finally { item.reversing = false; }
+  }
+  function restoreForward(lane, item) {
+    if (!item.reversed) return; item.source.stop(); item.source.disconnect();
+    const audio = new Audio(item.url); audio.loop = true; setPitchMode(audio); const source = ctx.createMediaElementSource(audio); source.connect(linked.has(lane) ? fx.input : laneNodes[lane].input);
+    item.audio = audio; item.source = source; item.reversed = false; audio.play();
+  }
+  function updateReverseMode(type) {
+    if (!ctx) return;
+    Object.entries(active).forEach(([lane, item]) => {
+      if (type === 'reverse' && linked.has(lane) && !item.reversed) playReverse(lane, item);
+      if (type !== 'reverse' && item.reversed) restoreForward(lane, item);
+    });
   }
   function makeCurve(amount) { const curve = new Float32Array(44100); for (let i = 0; i < curve.length; i++) { const x = i * 2 / curve.length - 1; curve[i] = (1 + amount) * x / (1 + amount * Math.abs(x)); } return curve; }
   function setBPM(value) { bpm = Math.max(60, Math.min(180, value)); $('#bpmOut').textContent = `${bpm} BPM`; updateFX(); }
@@ -160,5 +186,5 @@
   $('#inputRecord').onclick = recordInput; $('#importAudio').onchange = importAudio; $('#inputPlay').onclick = () => playRecording(false); $('#inputLoop').onclick = () => playRecording(true);
   $('#inputLink').onclick = event => { const on = event.currentTarget.getAttribute('aria-pressed') !== 'true'; event.currentTarget.setAttribute('aria-pressed',String(on)); status(`Recording ${on ? 'linked to' : 'unlinked from'} effects.`); };
   $('#songRecord').onclick = recordSong; $('#songPlay').onclick = toggleSongPlayback; $('#exportSong').onclick = () => { const link = document.createElement('a'); link.href = songUrl; link.download = 'UCreate-song.webm'; link.click(); status('Song export started.'); }; $('#reset').onclick = reset;
-  addPads(); wireLinks(); loadPackRecordings();
+  addPads(); wireLinks(); loadPackRecordings(); updateFX();
 })();
